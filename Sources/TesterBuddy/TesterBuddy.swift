@@ -7,7 +7,7 @@ import UIKit
 /// TesterBuddy.configure(apiKey: "your_web_api_key")
 /// ```
 ///
-/// For URL scheme-based auto-identification, forward incoming URLs:
+/// For URL scheme-based auto-identification (web apps), forward incoming URLs:
 /// ```swift
 /// .onOpenURL { url in TesterBuddy.handleURL(url) }
 /// ```
@@ -16,19 +16,21 @@ public final class TesterBuddy {
     // MARK: - Public API
 
     /// Configure and start the SDK. Call this in `application(_:didFinishLaunchingWithOptions:)` or `App.init()`.
-    /// Automatically detects a TesterBuddy tester ID from the clipboard (placed there by the TesterBuddy app
-    /// before opening TestFlight), so testers are identified without any extra steps.
+    /// Automatically identifies enrolled TesterBuddy testers by matching the device against
+    /// an active testing session registered by the TesterBuddy app — no extra setup required.
     public static func configure(apiKey: String, userId: Int? = nil) {
         shared.apiKey = apiKey
         if let userId {
             shared.userId = userId
+        } else if let saved = UserDefaults.standard.value(forKey: "TBTesterId") as? Int {
+            shared.userId = saved
         } else {
-            shared.detectTesterFromClipboard()
+            Task { await shared.detectTesterFromBackend() }
         }
         shared.setup()
     }
 
-    /// Forward URL opens to let the SDK auto-identify testers who open the app via TesterBuddy deep link.
+    /// Forward URL opens to let the SDK auto-identify testers who open the app via TesterBuddy deep link (web apps).
     /// Call this from your SwiftUI `.onOpenURL` modifier or `application(_:open:options:)`.
     /// - Returns: `true` if the URL was a TesterBuddy link and was handled.
     @discardableResult
@@ -38,12 +40,18 @@ public final class TesterBuddy {
               let idStr = items.first(where: { $0.name == "tb_tester_id" })?.value,
               let userId = Int(idStr) else { return false }
         shared.userId = userId
+        UserDefaults.standard.set(userId, forKey: "TBTesterId")
         return true
     }
 
-    /// Identify the current tester after login. Pass `nil` on logout.
+    /// Identify the current tester manually. Pass `nil` on logout.
     public static func setUserId(_ userId: Int?) {
         shared.userId = userId
+        if let userId {
+            UserDefaults.standard.set(userId, forKey: "TBTesterId")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "TBTesterId")
+        }
     }
 
     /// Set the current screen name included in all subsequent events.
@@ -98,14 +106,30 @@ public final class TesterBuddy {
         eventSender.send(events: events, apiKey: apiKey)
     }
 
-    // Reads the TesterBuddy tester token from clipboard (placed there by the TesterBuddy app before
-    // opening TestFlight). Clears the token after reading so it doesn't persist across sessions.
-    private func detectTesterFromClipboard() {
-        let prefix = "tb:uid:"
-        guard let clip = UIPasteboard.general.string,
-              clip.hasPrefix(prefix),
-              let uid = Int(clip.dropFirst(prefix.count)) else { return }
-        userId = uid
-        UIPasteboard.general.string = ""
+    // Asks TesterBuddy backend if there's an active testing session for this device.
+    // TesterBuddy app creates the session (POST /api/sdk/active-session) when the tester
+    // taps "Start Testing". The hint is device model + OS version — same value on both apps.
+    private func detectTesterFromBackend() async {
+        guard !apiKey.isEmpty,
+              let url = URL(string: "https://testerbuddy.app/api/sdk/active-session?hint=\(deviceHint())") else { return }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "x-tb-key")
+        request.timeoutInterval = 5
+
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let testerId = json["testerId"] as? Int else { return }
+
+        userId = testerId
+        UserDefaults.standard.set(testerId, forKey: "TBTesterId")
+    }
+
+    private func deviceHint() -> String {
+        let raw = UIDevice.current.model + "|" + UIDevice.current.systemVersion
+        return Data(raw.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
