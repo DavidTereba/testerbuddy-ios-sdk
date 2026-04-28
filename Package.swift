@@ -10,7 +10,10 @@ let package = Package(
     targets: [
         .target(
             name: "TesterBuddy",
-            path: "Sources/TesterBuddy"
+            path: "Sources/TesterBuddy",
+            resources: [
+                .process("PrivacyInfo.xcprivacy")
+            ]
         )
     ]
 )

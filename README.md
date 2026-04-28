@@ -1,36 +1,36 @@
 # TesterBuddy iOS SDK
 
-Capture crashes, errors, and tester feedback directly from your iOS app — visible in your [TesterBuddy](https://testerbuddy.app) dashboard alongside web SDK events.
+Capture crashes, ANRs, network errors, and tester feedback directly from your iOS app — all visible in your [TesterBuddy](https://testerbuddy.app) dashboard.
+
+> **Dashboard support:** Crash and feedback events require TesterBuddy iOS app **version 2.1.1+**.
+
+---
 
 ## Requirements
 
-- iOS 16+
-- Swift 5.9+
-- A TesterBuddy account with an active app (Web/iOS platform)
-
-> **Note:** Crash and feedback events are visible in the TesterBuddy iOS app starting from **version 2.1.1**.
+| | |
+|---|---|
+| Platform | iOS 16+ |
+| Language | Swift 5.9+ |
+| Account | [TesterBuddy](https://testerbuddy.app) — free |
 
 ---
 
 ## Installation
 
-In Xcode: **File → Add Package Dependencies**
-
-Enter the repository URL:
+**File → Add Package Dependencies** in Xcode, paste the URL:
 
 ```
 https://github.com/DavidTereba/testerbuddy-ios-sdk
 ```
 
-Select version **1.0.0** or later, then add the `TesterBuddy` library to your target.
+Select **1.2.0** or later, add `TesterBuddy` to your target.
 
 ---
 
 ## Quick Start
 
-### 1. Configure the SDK
-
-Call `configure` as early as possible — in your `App.init()` or `application(_:didFinishLaunchingWithOptions:)`.
+Call `configure` as early as possible — `App.init()` or `application(_:didFinishLaunchingWithOptions:)`.
 
 ```swift
 import TesterBuddy
@@ -38,93 +38,195 @@ import TesterBuddy
 @main
 struct MyApp: App {
     init() {
-        TesterBuddy.configure(apiKey: "your_web_api_key")
+        TesterBuddy.configure(apiKey: "your_sdk_key")
     }
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
+    var body: some Scene { WindowGroup { ContentView() } }
 }
 ```
 
-Your **API key** is the `web_api_key` shown in your app's settings on TesterBuddy.
+Your **SDK key** is shown in the TesterBuddy dashboard → App detail → iOS SDK Setup.
 
-### 2. Identify the tester (optional but recommended)
-
-Call after the user signs in so feedback is linked to their TesterBuddy profile:
+### All configure options
 
 ```swift
-TesterBuddy.setUserId(currentUser.id)
-```
-
-Call with `nil` on logout:
-
-```swift
-TesterBuddy.setUserId(nil)
-```
-
-### 3. Track screens (optional)
-
-Set the current screen name so all events include context:
-
-```swift
-.onAppear {
-    TesterBuddy.setScreen("HomeView")
-}
+TesterBuddy.configure(
+    apiKey: "your_sdk_key",
+    userId: nil,                    // optional: set tester ID manually
+    enableANRDetection: true,       // detect frozen main thread (≥ 5 s)
+    enableNetworkMonitoring: false, // intercept failed URLSession requests (opt-in)
+    enableSessionTracking: true,    // track launch count & session duration
+    enableAnnouncements: true       // show developer banners inside the app
+)
 ```
 
 ---
 
 ## Features
 
-### Crash Reporting
+### 💥 Crash Reporting
 
-Automatically captures uncaught exceptions via `NSUncaughtExceptionHandler`. Crash details are saved to disk and sent on the next app launch so nothing is lost.
+Automatically installed. Captures uncaught exceptions via `NSUncaughtExceptionHandler`. Crash data is saved to disk and sent on the **next launch** so nothing is lost even if the network was offline.
 
-No additional setup required.
+Chain-calls any previously registered handler, so it's compatible with Firebase Crashlytics, Sentry, etc.
 
-### Shake to Report
+---
 
-When a tester shakes the device, a feedback sheet appears with:
-- A screenshot of the current screen
-- Bug / Idea / Other type selector
-- A description field
+### 📳 Shake to Report
 
-The report is sent to your TesterBuddy dashboard immediately.
+Tester shakes the device → feedback sheet slides up with:
+- Screenshot of the current screen
+- Bug / Idea / Other selector
+- Description field
 
-Works automatically after `configure()` — no view modifications needed.
+The report is sent to your dashboard immediately **and** posted as a message to the tester's feedback thread — you get a push notification.
 
-### Manual Event Logging
+No view modifications needed. Works out of the box after `configure()`.
+
+---
+
+### 🔴 ANR Detection
+
+Monitors the main thread with a background watchdog. If the main thread is unresponsive for **≥ 5 seconds**, an `anr` event is logged with the duration and current screen name.
+
+Enabled by default. To disable:
 
 ```swift
-// Custom event
-TesterBuddy.log(message: "User reached onboarding step 3")
-
-// Network error
-TesterBuddy.logNetworkError(url: "https://api.example.com/data", statusCode: 503)
-
-// With metadata
-TesterBuddy.log(message: "Feature flag evaluated", metadata: [
-    "flag": "new_checkout",
-    "value": "enabled"
-])
+TesterBuddy.configure(apiKey: "...", enableANRDetection: false)
 ```
 
 ---
 
-## Dashboard
+### 🌐 Network Monitoring *(opt-in)*
 
-Events appear in the **Web Events** tab of your app in TesterBuddy. Use the **Crashes** filter to see iOS crash reports separately from JS errors.
+Intercepts all `URLSession.shared` and default-configuration sessions. Reports failed connections and HTTP 4xx/5xx responses as `network_error` events.
 
-Feedback submitted via shake includes an inline screenshot preview.
+```swift
+TesterBuddy.configure(apiKey: "...", enableNetworkMonitoring: true)
+```
+
+> Covers requests through `URLSession.shared` and `.default` configuration. Sessions with custom configurations are not intercepted.
+
+You can also log network errors manually:
+
+```swift
+TesterBuddy.logNetworkError(url: "https://api.example.com/items", statusCode: 503)
+```
 
 ---
 
-## Privacy
+### 📊 Session Tracking
 
-The SDK does not collect any personally identifiable information unless you call `setUserId()`. It never reads view content, keystrokes, or user data. All events are associated only with the TesterBuddy tester who is actively testing your app.
+Tracks launch count, session duration, and whether the previous session ended in a crash. Sends a `session` event on each launch and when the app goes to background.
+
+Visible in the dashboard under the **Custom** events filter.
+
+To disable:
+
+```swift
+TesterBuddy.configure(apiKey: "...", enableSessionTracking: false)
+```
+
+---
+
+### 📣 Developer Announcements
+
+Send a message from the TesterBuddy dashboard directly into your app. The message appears as a **non-blocking banner** at the top of the screen for any tester who opens the app.
+
+- Types: **Info** (dark), **Warning** (orange), **Update** (blue)
+- Optional expiry (e.g. auto-hide after 24 hours)
+- Each announcement is shown once per device
+- Tap to dismiss or auto-dismisses after 8 seconds
+
+Create announcements from the iOS developer dashboard → App detail → Announcements section.
+
+To disable:
+
+```swift
+TesterBuddy.configure(apiKey: "...", enableAnnouncements: false)
+```
+
+---
+
+### 📦 Offline Queue
+
+Events captured while the device is offline (no network, server unreachable) are stored in the app's cache directory and automatically flushed on the next successful send. Capacity is capped at **500 events** (oldest dropped first).
+
+No setup required — works transparently for all event types.
+
+---
+
+### ✏️ Manual Logging
+
+```swift
+// Custom event
+TesterBuddy.log(message: "User completed onboarding")
+
+// With metadata
+TesterBuddy.log(message: "Feature flag evaluated", metadata: [
+    "flag": "new_checkout",
+    "result": "enabled"
+])
+
+// Network error (when networkMonitoring is disabled)
+TesterBuddy.logNetworkError(url: "https://api.example.com/data", statusCode: 503)
+```
+
+---
+
+### 👤 Tester Identification
+
+**Automatic (TestFlight):** When a tester taps "Start Testing" in the TesterBuddy app, a one-time token is placed in the clipboard. On first launch of your app, the SDK reads and exchanges it automatically — no manual code needed.
+
+> iOS 16+ shows a brief *"App pasted from TesterBuddy"* banner. This is expected in a beta testing context and declared in the SDK's privacy manifest.
+
+**Manual:**
+
+```swift
+TesterBuddy.setUserId(currentUser.tbTesterId)  // on sign-in
+TesterBuddy.setUserId(nil)                     // on sign-out
+```
+
+---
+
+### 🗺️ Screen Tracking
+
+Set the current screen so all events include context:
+
+```swift
+.onAppear {
+    TesterBuddy.setScreen("CheckoutView")
+}
+```
+
+---
+
+## Privacy & App Store
+
+The SDK ships with a **`PrivacyInfo.xcprivacy`** manifest (required by Apple since May 2024).
+
+| API | Reason code | Why |
+|-----|-------------|-----|
+| `NSUserDefaults` | `CA92.1` | Store crash queue, tester ID, session counters |
+| `UIPasteboard` | `C56D.1` | Read one-time tester token placed by TesterBuddy |
+| File timestamp | `C617.1` | Write offline event queue to caches directory |
+
+**Data collected** (declared in manifest, not linked to user identity, not used for tracking):
+- Crash data
+- Performance / diagnostic data
+
+**What the SDK does NOT do:**
+- No IDFA / ATT usage → no tracking prompt required
+- No keylogger, no view content reading, no microphone / camera
+- No data sold or shared beyond testerbuddy.app
+
+### App Store privacy nutrition label
+
+When submitting to the App Store, declare in **App Privacy**:
+- **Crash Data** → App Functionality → Not linked to user
+- **Performance Data** → App Functionality → Not linked to user
+
+If you use `setUserId()`, add:
+- **User ID** → Developer's Advertising or Developer's App Functionality → Linked to user
 
 ---
 

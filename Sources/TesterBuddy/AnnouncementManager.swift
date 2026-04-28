@@ -1,0 +1,214 @@
+import UIKit
+
+// MARK: - Model
+
+struct TBAnnouncement: Codable {
+    let id: Int
+    let title: String
+    let message: String
+    let type: String   // "info" | "warning" | "update"
+}
+
+// MARK: - Manager
+
+/// Polls `/api/sdk/announcements` for developer-sent messages and shows
+/// a non-intrusive banner at the top of the screen.
+///
+/// Announcements are shown once per device (seen IDs stored in UserDefaults).
+/// Polling happens on app foreground so developers get near-real-time delivery.
+final class AnnouncementManager {
+
+    private static let seenKey = "TBSeenAnnouncements"
+    private var apiKey: String = ""
+
+    func start(apiKey: String) {
+        self.apiKey = apiKey
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        Task { await fetch() }
+    }
+
+    @objc private func appDidBecomeActive() {
+        Task { await fetch() }
+    }
+
+    // MARK: - Private
+
+    private func fetch() async {
+        guard !apiKey.isEmpty,
+              let url = URL(string: "https://testerbuddy.app/api/sdk/announcements")
+        else { return }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "x-tb-key")
+        request.timeoutInterval = 5
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let announcements = try? JSONDecoder().decode([TBAnnouncement].self, from: data)
+        else { return }
+
+        let seen = UserDefaults.standard.array(forKey: Self.seenKey) as? [Int] ?? []
+        let unseen = announcements.filter { !seen.contains($0.id) }
+        guard let first = unseen.first else { return }
+
+        // Mark all unseen as seen (only show the latest one)
+        let updated = seen + unseen.map(\.id)
+        UserDefaults.standard.set(updated, forKey: Self.seenKey)
+
+        await MainActor.run { AnnouncementBannerWindow.show(first) }
+    }
+}
+
+// MARK: - Banner Window
+
+final class AnnouncementBannerWindow {
+
+    private static var window: UIWindow?
+
+    static func show(_ announcement: TBAnnouncement) {
+        guard window == nil,
+              let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first
+        else { return }
+
+        let w = UIWindow(windowScene: scene)
+        w.windowLevel = .statusBar + 1
+        w.backgroundColor = .clear
+        w.isUserInteractionEnabled = true
+
+        let vc = UIViewController()
+        vc.view.backgroundColor = .clear
+
+        let banner = AnnouncementBannerView(announcement: announcement) { dismiss() }
+        vc.view.addSubview(banner)
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            banner.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor, constant: 12),
+            banner.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor, constant: -12),
+        ])
+
+        w.rootViewController = vc
+        w.makeKeyAndVisible()
+        window = w
+
+        // Animate in
+        banner.alpha = 0
+        banner.transform = CGAffineTransform(translationX: 0, y: -20)
+        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.8,
+                       initialSpringVelocity: 0.5) {
+            banner.alpha = 1
+            banner.transform = .identity
+        }
+
+        // Auto-dismiss after 8 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { dismiss() }
+    }
+
+    static func dismiss() {
+        guard let w = window else { return }
+        UIView.animate(withDuration: 0.25, animations: {
+            w.alpha = 0
+            w.rootViewController?.view.subviews.first?.transform = CGAffineTransform(translationX: 0, y: -20)
+        }) { _ in
+            w.isHidden = true
+            window = nil
+        }
+    }
+}
+
+// MARK: - Banner View (UIKit)
+
+private final class AnnouncementBannerView: UIView {
+
+    init(announcement: TBAnnouncement, onDismiss: @escaping () -> Void) {
+        super.init(frame: .zero)
+
+        backgroundColor = bannerColor(for: announcement.type)
+        layer.cornerRadius = 14
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.18
+        layer.shadowRadius = 8
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+
+        let icon = UIImageView(image: UIImage(systemName: iconName(for: announcement.type)))
+        icon.tintColor = .white
+        icon.contentMode = .scaleAspectFit
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 20).isActive = true
+
+        let titleLabel = UILabel()
+        titleLabel.text = announcement.title
+        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        titleLabel.textColor = .white
+        titleLabel.numberOfLines = 1
+
+        let messageLabel = UILabel()
+        messageLabel.text = announcement.message
+        messageLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        messageLabel.textColor = UIColor.white.withAlphaComponent(0.9)
+        messageLabel.numberOfLines = 3
+
+        let textStack = UIStackView(arrangedSubviews: [titleLabel, messageLabel])
+        textStack.axis = .vertical
+        textStack.spacing = 2
+
+        let closeButton = UIButton(type: .system)
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = UIColor.white.withAlphaComponent(0.8)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        closeButton.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        closeButton.addAction(UIAction { _ in onDismiss() }, for: .touchUpInside)
+
+        let hStack = UIStackView(arrangedSubviews: [icon, textStack, closeButton])
+        hStack.axis = .horizontal
+        hStack.spacing = 10
+        hStack.alignment = .center
+        hStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hStack)
+
+        NSLayoutConstraint.activate([
+            hStack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            hStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            hStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            hStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+        ])
+
+        // Tap whole banner to dismiss
+        addGestureRecognizer(UITapGestureRecognizer(target: nil, action: nil))
+        let tap = UITapGestureRecognizer()
+        tap.addTarget(self, action: #selector(tapped))
+        addGestureRecognizer(tap)
+        _dismiss = onDismiss
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var _dismiss: (() -> Void)?
+    @objc private func tapped() { _dismiss?() }
+
+    // MARK: - Helpers
+
+    private func bannerColor(for type: String) -> UIColor {
+        switch type {
+        case "warning": return UIColor(red: 0.85, green: 0.45, blue: 0.10, alpha: 1)
+        case "update":  return UIColor(red: 0.20, green: 0.45, blue: 0.90, alpha: 1)
+        default:        return UIColor(red: 0.18, green: 0.18, blue: 0.22, alpha: 0.95)
+        }
+    }
+
+    private func iconName(for type: String) -> String {
+        switch type {
+        case "warning": return "exclamationmark.triangle.fill"
+        case "update":  return "arrow.down.circle.fill"
+        default:        return "megaphone.fill"
+        }
+    }
+}

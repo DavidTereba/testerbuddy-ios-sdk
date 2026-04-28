@@ -6,6 +6,8 @@ public enum TBEventType: String {
     case networkError = "network_error"
     case feedback
     case custom
+    case anr
+    case session
 }
 
 struct TBEvent: Codable {

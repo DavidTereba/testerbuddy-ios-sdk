@@ -3,8 +3,8 @@ import UIKit
 final class EventSender {
 
     private let endpoint = URL(string: "https://testerbuddy.app/api/sdk/ingest")!
-
     let sessionId: String = UUID().uuidString
+    let offlineQueue = OfflineQueue()
 
     lazy var userAgent: String = {
         let info = Bundle.main.infoDictionary
@@ -42,14 +42,18 @@ final class EventSender {
         )
     }
 
+    /// Send events. Any queued offline events are prepended and sent together.
+    /// On failure the full batch is re-queued for the next attempt.
     func send(events: [TBEvent], apiKey: String) {
-        guard !events.isEmpty, !apiKey.isEmpty else { return }
+        guard !apiKey.isEmpty else { return }
 
-        struct Payload: Encodable {
-            let events: [TBEvent]
-        }
+        // Drain offline queue and prepend to current batch
+        let queued = offlineQueue.drainAll()
+        let batch = queued + events
+        guard !batch.isEmpty else { return }
 
-        guard let body = try? JSONEncoder().encode(Payload(events: events)) else { return }
+        struct Payload: Encodable { let events: [TBEvent] }
+        guard let body = try? JSONEncoder().encode(Payload(events: batch)) else { return }
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -58,6 +62,13 @@ final class EventSender {
         request.httpBody = body
         request.timeoutInterval = 10
 
-        URLSession.shared.dataTask(with: request).resume()
+        let queue = self.offlineQueue
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            let success = error == nil && (response as? HTTPURLResponse)?.statusCode == 200
+            if !success {
+                // Re-queue for next launch
+                queue.enqueue(batch)
+            }
+        }.resume()
     }
 }
