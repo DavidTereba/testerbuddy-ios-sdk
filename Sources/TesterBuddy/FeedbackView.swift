@@ -137,9 +137,8 @@ struct FeedbackView: View {
                             .focused($focused)
                             .scrollContentBackground(.hidden)
                             .padding(8)
-                            .frame(minHeight: 72, maxHeight: 110)
                     }
-                    .frame(minHeight: 88)
+                    .frame(height: 100)
 
                     // Send button
                     Button {
