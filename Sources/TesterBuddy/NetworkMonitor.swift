@@ -74,7 +74,7 @@ extension TBNetworkProtocol: URLSessionDataDelegate {
             if let http = task.response as? HTTPURLResponse, http.statusCode >= 400 {
                 reportHTTPError(http, for: task.originalRequest)
             }
-            client?.urlProtocol(self, didFinishLoading: ())
+            client?.urlProtocolDidFinishLoading(self)
         }
     }
 
