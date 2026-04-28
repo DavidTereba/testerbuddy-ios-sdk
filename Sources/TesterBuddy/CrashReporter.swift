@@ -1,9 +1,13 @@
 import Foundation
 
+// File-level global — C function pointers cannot capture type-scoped context,
+// so the previous handler must live at module scope to be reachable from the closure.
+private var _tbPreviousExceptionHandler: NSUncaughtExceptionHandler?
+
 enum CrashReporter {
 
-    private static let pendingKey = "TBPendingCrashes"
-    private static var previousExceptionHandler: NSUncaughtExceptionHandler?
+    // Keep the key as a compile-time constant so the closure can use the literal directly.
+    static let pendingKey = "TBPendingCrashes"
 
     static func install() {
         flushPending()
@@ -19,7 +23,7 @@ enum CrashReporter {
     }
 
     private static func installExceptionHandler() {
-        previousExceptionHandler = NSGetUncaughtExceptionHandler()
+        _tbPreviousExceptionHandler = NSGetUncaughtExceptionHandler()
         NSSetUncaughtExceptionHandler { exception in
             let message = "\(exception.name.rawValue): \(exception.reason ?? "no reason")"
             let stack = exception.callStackSymbols.prefix(40).joined(separator: "\n")
@@ -33,11 +37,11 @@ enum CrashReporter {
             )
 
             if let data = try? JSONEncoder().encode([event]) {
-                UserDefaults.standard.set(data, forKey: CrashReporter.pendingKey)
+                UserDefaults.standard.set(data, forKey: "TBPendingCrashes")
                 UserDefaults.standard.synchronize()
             }
 
-            previousExceptionHandler?(exception)
+            _tbPreviousExceptionHandler?(exception)
         }
     }
 }
