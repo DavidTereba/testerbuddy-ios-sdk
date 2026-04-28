@@ -29,7 +29,12 @@ final class AnnouncementManager {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
-        Task { await fetch() }
+        // Delay the initial fetch so the UIWindowScene is fully ready.
+        // configure() is often called before the first window is attached.
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 s
+            await fetch()
+        }
     }
 
     @objc private func appDidBecomeActive() {
@@ -70,14 +75,16 @@ final class AnnouncementManager {
         let unseen = announcements.filter { !seen.contains($0.id) }
         guard let first = unseen.first else { return }
 
-        // Mark all unseen as seen locally (only show the latest one visually)
+        // Try to show the banner first — only mark as seen if display succeeds.
+        let shown = await MainActor.run { AnnouncementBannerWindow.show(first) }
+        guard shown else { return }
+
+        // Mark all fetched unseen IDs as seen so they don't repeat
         let updated = seen + unseen.map(\.id)
         UserDefaults.standard.set(updated, forKey: Self.seenKey)
 
         // Report viewed IDs to backend so view_count is incremented
         reportSeen(ids: unseen.map(\.id), apiKey: apiKey)
-
-        await MainActor.run { AnnouncementBannerWindow.show(first) }
     }
 }
 
@@ -87,11 +94,14 @@ final class AnnouncementBannerWindow {
 
     private static var window: UIWindow?
 
-    static func show(_ announcement: TBAnnouncement) {
+    /// Returns `true` if the banner was successfully attached to a window scene.
+    @discardableResult
+    static func show(_ announcement: TBAnnouncement) -> Bool {
         guard window == nil,
               let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene }).first
-        else { return }
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+        else { return false }
 
         let w = UIWindow(windowScene: scene)
         w.windowLevel = .statusBar + 1
@@ -125,6 +135,8 @@ final class AnnouncementBannerWindow {
 
         // Auto-dismiss after 8 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { dismiss() }
+
+        return true
     }
 
     static func dismiss() {
