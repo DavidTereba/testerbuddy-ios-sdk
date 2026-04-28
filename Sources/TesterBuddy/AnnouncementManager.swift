@@ -38,6 +38,20 @@ final class AnnouncementManager {
 
     // MARK: - Private
 
+    private func reportSeen(ids: [Int], apiKey: String) {
+        guard !ids.isEmpty,
+              let url = URL(string: "https://testerbuddy.app/api/sdk/announcements/seen"),
+              let body = try? JSONSerialization.data(withJSONObject: ["ids": ids])
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(apiKey, forHTTPHeaderField: "x-tb-key")
+        req.httpBody = body
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
     private func fetch() async {
         guard !apiKey.isEmpty,
               let url = URL(string: "https://testerbuddy.app/api/sdk/announcements")
@@ -56,9 +70,12 @@ final class AnnouncementManager {
         let unseen = announcements.filter { !seen.contains($0.id) }
         guard let first = unseen.first else { return }
 
-        // Mark all unseen as seen (only show the latest one)
+        // Mark all unseen as seen locally (only show the latest one visually)
         let updated = seen + unseen.map(\.id)
         UserDefaults.standard.set(updated, forKey: Self.seenKey)
+
+        // Report viewed IDs to backend so view_count is incremented
+        reportSeen(ids: unseen.map(\.id), apiKey: apiKey)
 
         await MainActor.run { AnnouncementBannerWindow.show(first) }
     }
