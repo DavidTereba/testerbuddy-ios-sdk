@@ -29,10 +29,9 @@ final class AnnouncementManager {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
-        // Delay the initial fetch so the UIWindowScene is fully ready.
-        // configure() is often called before the first window is attached.
+        // Short delay so the UIWindowScene is attached before we try to show a banner.
         Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 s
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 s
             await fetch()
         }
     }
@@ -100,7 +99,7 @@ final class AnnouncementBannerWindow {
         guard window == nil,
               let scene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive })
+                .first
         else { return false }
 
         let w = UIWindow(windowScene: scene)
