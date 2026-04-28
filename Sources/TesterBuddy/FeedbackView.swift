@@ -66,19 +66,18 @@ struct FeedbackView: View {
     var body: some View {
         ZStack {
             // Dimmed backdrop
-            Color.black.opacity(0.55)
+            Color.black.opacity(0.5)
                 .ignoresSafeArea()
                 .onTapGesture { focused = false }
 
             VStack(spacing: 0) {
                 Spacer()
 
-                VStack(spacing: 20) {
+                VStack(spacing: 14) {
                     // Header
                     HStack {
                         Text("Send Feedback")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 16, weight: .semibold))
                         Spacer()
                         Button(action: onDismiss) {
                             Image(systemName: "xmark.circle.fill")
@@ -87,32 +86,41 @@ struct FeedbackView: View {
                         }
                     }
 
-                    // Screenshot preview
-                    if let img = screenshot {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 160)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 1))
-                    }
+                    // Screenshot thumbnail + type picker side by side
+                    HStack(alignment: .center, spacing: 12) {
+                        if let img = screenshot {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 52, height: 68)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                )
+                        }
 
-                    // Type picker
-                    HStack(spacing: 10) {
-                        ForEach(FeedbackType.allCases, id: \.self) { t in
-                            Button {
-                                type = t
-                            } label: {
-                                Label(t.rawValue, systemImage: t.icon)
-                                    .font(.subheadline.weight(.medium))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
+                        HStack(spacing: 7) {
+                            ForEach(FeedbackType.allCases, id: \.self) { t in
+                                Button {
+                                    type = t
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: t.icon)
+                                            .font(.system(size: 11))
+                                        Text(t.rawValue)
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
                                     .background(type == t ? Color.accentColor : Color(UIColor.tertiarySystemFill))
                                     .foregroundStyle(type == t ? .white : .primary)
                                     .clipShape(Capsule())
+                                }
                             }
                         }
-                        Spacer()
+
+                        Spacer(minLength: 0)
                     }
 
                     // Description
@@ -122,15 +130,16 @@ struct FeedbackView: View {
                         if description.isEmpty {
                             Text("Describe what happened…")
                                 .foregroundStyle(.tertiary)
+                                .font(.subheadline)
                                 .padding(12)
                         }
                         TextEditor(text: $description)
                             .focused($focused)
                             .scrollContentBackground(.hidden)
                             .padding(8)
-                            .frame(minHeight: 90, maxHeight: 140)
+                            .frame(minHeight: 72, maxHeight: 110)
                     }
-                    .frame(minHeight: 110)
+                    .frame(minHeight: 88)
 
                     // Send button
                     Button {
@@ -142,14 +151,19 @@ struct FeedbackView: View {
                                     .tint(.white)
                             } else if sent {
                                 Label("Sent!", systemImage: "checkmark")
+                                    .fontWeight(.semibold)
                             } else {
                                 Text("Send Feedback")
                                     .fontWeight(.semibold)
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.accentColor)
+                        .padding(.vertical, 13)
+                        .background(
+                            description.trimmingCharacters(in: .whitespaces).isEmpty
+                                ? Color.accentColor.opacity(0.35)
+                                : Color.accentColor
+                        )
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
@@ -159,7 +173,7 @@ struct FeedbackView: View {
                 .background(Color(UIColor.systemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16)
-                .padding(.bottom, 32)
+                .padding(.bottom, 28)
             }
         }
         .ignoresSafeArea()
