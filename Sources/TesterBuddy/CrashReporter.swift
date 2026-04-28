@@ -3,6 +3,7 @@ import Foundation
 enum CrashReporter {
 
     private static let pendingKey = "TBPendingCrashes"
+    private static var previousExceptionHandler: NSUncaughtExceptionHandler?
 
     static func install() {
         flushPending()
@@ -18,7 +19,7 @@ enum CrashReporter {
     }
 
     private static func installExceptionHandler() {
-        let previous = NSGetUncaughtExceptionHandler()
+        previousExceptionHandler = NSGetUncaughtExceptionHandler()
         NSSetUncaughtExceptionHandler { exception in
             let message = "\(exception.name.rawValue): \(exception.reason ?? "no reason")"
             let stack = exception.callStackSymbols.prefix(40).joined(separator: "\n")
@@ -36,7 +37,7 @@ enum CrashReporter {
                 UserDefaults.standard.synchronize()
             }
 
-            previous?(exception)
+            previousExceptionHandler?(exception)
         }
     }
 }
