@@ -18,15 +18,6 @@
                 <string>CA92.1</string>
             </array>
         </dict>
-        <!-- Pasteboard: read one-time tester-identification token placed by TesterBuddy app -->
-        <dict>
-            <key>NSPrivacyAccessedAPIType</key>
-            <string>NSPrivacyAccessedAPICategoryPasteboard</string>
-            <key>NSPrivacyAccessedAPITypeReasons</key>
-            <array>
-                <string>C56D.1</string>
-            </array>
-        </dict>
         <!-- File timestamp: used when writing the offline event queue to the caches directory -->
         <dict>
             <key>NSPrivacyAccessedAPIType</key>
