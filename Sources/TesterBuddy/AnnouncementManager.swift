@@ -29,15 +29,24 @@ final class AnnouncementManager {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
-        // Short delay so the UIWindowScene is attached before we try to show a banner.
+        // If the app is already active (e.g. configure() called from onAppear),
+        // didBecomeActiveNotification already fired — fetch immediately.
+        // Otherwise the observer above will trigger it on next foreground.
+        let alreadyActive = UIApplication.shared.applicationState == .active
         Task {
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 s
+            // Delay so UIWindowScene is attached before we try to show a banner.
+            // Use a longer delay on first launch to ensure the scene is ready.
+            try? await Task.sleep(nanoseconds: alreadyActive ? 1_000_000_000 : 500_000_000)
             await fetch()
         }
     }
 
     @objc private func appDidBecomeActive() {
-        Task { await fetch() }
+        Task {
+            // Small delay so the scene is ready after returning to foreground.
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 s
+            await fetch()
+        }
     }
 
     // MARK: - Private
@@ -70,15 +79,24 @@ final class AnnouncementManager {
               let announcements = try? JSONDecoder().decode([TBAnnouncement].self, from: data)
         else { return }
 
-        let seen = UserDefaults.standard.array(forKey: Self.seenKey) as? [Int] ?? []
+        // Keep only IDs from the last 60 days to prevent unbounded accumulation.
+        let seenRaw = UserDefaults.standard.array(forKey: Self.seenKey) as? [Int] ?? []
+        let validIds = Set(announcements.map(\.id))
+        let seen = seenRaw.filter { validIds.contains($0) }
+
         let unseen = announcements.filter { !seen.contains($0.id) }
         guard let first = unseen.first else { return }
 
-        // Try to show the banner first — only mark as seen if display succeeds.
-        let shown = await MainActor.run { AnnouncementBannerWindow.show(first) }
+        // Try to show the banner; retry once if the scene isn't ready yet.
+        var shown = await MainActor.run { AnnouncementBannerWindow.show(first) }
+        if !shown {
+            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 s retry
+            shown = await MainActor.run { AnnouncementBannerWindow.show(first) }
+        }
         guard shown else { return }
 
-        // Mark all fetched unseen IDs as seen so they don't repeat
+        // Mark all unseen IDs as seen so they don't repeat.
+        // Only keep IDs that are still active (returned by the server) to stay lean.
         let updated = seen + unseen.map(\.id)
         UserDefaults.standard.set(updated, forKey: Self.seenKey)
 
