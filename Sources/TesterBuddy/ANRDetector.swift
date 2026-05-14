@@ -12,21 +12,45 @@ final class ANRDetector {
     private let queue = DispatchQueue(label: "app.testerbuddy.anr", qos: .background)
     private var isReporting = false
 
+    // Cancellation — protected by a lock so stop() is safe to call from any thread.
+    private let cancelLock = NSLock()
+    private var _isCancelled = false
+    private var isCancelled: Bool {
+        cancelLock.lock(); defer { cancelLock.unlock() }
+        return _isCancelled
+    }
+
     init(threshold: TimeInterval = 5.0) {
         self.threshold = threshold
     }
 
     func start() {
+        cancelLock.lock()
+        _isCancelled = false
+        cancelLock.unlock()
+
         queue.async { [weak self] in
             self?.watchLoop()
         }
     }
 
+    func stop() {
+        cancelLock.lock()
+        _isCancelled = true
+        cancelLock.unlock()
+    }
+
+    deinit {
+        stop()
+    }
+
     // MARK: - Private
 
     private func watchLoop() {
-        while true {
+        while !isCancelled {
             Thread.sleep(forTimeInterval: 1.0)
+            guard !isCancelled else { return }
+
             let semaphore = DispatchSemaphore(value: 0)
             let sent = Date()
 
@@ -35,6 +59,7 @@ final class ANRDetector {
             }
 
             let result = semaphore.wait(timeout: .now() + threshold)
+            guard !isCancelled else { return }
 
             if result == .timedOut {
                 if !isReporting {
@@ -43,12 +68,16 @@ final class ANRDetector {
                     report(blockedFor: blocked)
                 }
             } else {
+                if isReporting {
+                    TBLogger.debug("ANR resolved — main thread responsive again")
+                }
                 isReporting = false
             }
         }
     }
 
     private func report(blockedFor seconds: TimeInterval) {
+        TBLogger.debug("ANR detected: main thread blocked for \(Int(seconds))s")
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .anr,
             message: "ANR: main thread blocked for \(Int(seconds))s",

@@ -95,13 +95,13 @@ final class AnnouncementManager {
         }
         guard shown else { return }
 
-        // Mark all unseen IDs as seen so they don't repeat.
-        // Only keep IDs that are still active (returned by the server) to stay lean.
-        let updated = seen + unseen.map(\.id)
+        // Mark only the shown announcement as seen. Remaining unseen announcements
+        // will be shown on subsequent foregrounds (one per activation).
+        let updated = seen + [first.id]
         UserDefaults.standard.set(updated, forKey: Self.seenKey)
 
-        // Report viewed IDs to backend so view_count is incremented
-        reportSeen(ids: unseen.map(\.id), apiKey: apiKey)
+        // Report viewed ID to backend so view_count is incremented
+        reportSeen(ids: [first.id], apiKey: apiKey)
     }
 }
 

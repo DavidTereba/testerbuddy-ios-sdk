@@ -35,8 +35,11 @@ final class TBNetworkProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        // Mark as handled to avoid re-entry
-        let mutable = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        // Mark as handled to avoid re-entry; guard against unexpected cast failure
+        guard let mutable = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutable)
 
         let config = URLSessionConfiguration.default
@@ -83,6 +86,7 @@ extension TBNetworkProtocol: URLSessionDataDelegate {
     private func reportConnectionError(_ error: Error, for request: URLRequest?) {
         let url = request?.url?.absoluteString ?? "unknown"
         let code = (error as NSError).code
+        TBLogger.debug("Network error (\(code)) for \(url)")
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .networkError,
             message: "Network error (\(code)): \(error.localizedDescription)",
@@ -95,6 +99,7 @@ extension TBNetworkProtocol: URLSessionDataDelegate {
 
     private func reportHTTPError(_ response: HTTPURLResponse, for request: URLRequest?) {
         let url = request?.url?.absoluteString ?? "unknown"
+        TBLogger.debug("HTTP \(response.statusCode) for \(url)")
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .networkError,
             message: "HTTP \(response.statusCode): \(url)",

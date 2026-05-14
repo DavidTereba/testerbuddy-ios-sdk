@@ -44,16 +44,28 @@ final class EventSender {
 
     /// Send events. Any queued offline events are prepended and sent together.
     /// On failure the full batch is re-queued for the next attempt.
-    func send(events: [TBEvent], apiKey: String) {
-        guard !apiKey.isEmpty else { return }
+    /// - Parameter completion: Called on the URLSession background queue with
+    ///   `true` on HTTP 200, `false` on any error (events are re-queued for retry).
+    func send(events: [TBEvent], apiKey: String, completion: ((Bool) -> Void)? = nil) {
+        guard !apiKey.isEmpty else {
+            completion?(false)
+            return
+        }
 
         // Drain offline queue and prepend to current batch
         let queued = offlineQueue.drainAll()
         let batch = queued + events
-        guard !batch.isEmpty else { return }
+        guard !batch.isEmpty else {
+            completion?(true)
+            return
+        }
 
         struct Payload: Encodable { let events: [TBEvent] }
-        guard let body = try? JSONEncoder().encode(Payload(events: batch)) else { return }
+        guard let body = try? JSONEncoder().encode(Payload(events: batch)) else {
+            offlineQueue.enqueue(batch)
+            completion?(false)
+            return
+        }
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -66,9 +78,14 @@ final class EventSender {
         URLSession.shared.dataTask(with: request) { _, response, error in
             let success = error == nil && (response as? HTTPURLResponse)?.statusCode == 200
             if !success {
-                // Re-queue for next launch
                 queue.enqueue(batch)
+                let reason = error?.localizedDescription
+                    ?? "HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)"
+                TBLogger.debug("Send failed (\(reason)) — \(batch.count) event(s) re-queued")
+            } else {
+                TBLogger.debug("Sent \(batch.count) event(s) successfully")
             }
+            completion?(success)
         }.resume()
     }
 }

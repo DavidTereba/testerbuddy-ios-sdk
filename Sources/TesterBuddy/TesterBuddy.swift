@@ -23,22 +23,34 @@ public final class TesterBuddy {
     ///   - enableSessionTracking: Send session start/end events. Default `true`.
     ///   - enableAnnouncements: Poll for developer announcements and show banners.
     ///     Default `true`.
+    ///   - debugLogging: Print diagnostic messages to the console via `os_log`.
+    ///     Default `false`. Disable before shipping to the App Store.
     public static func configure(
         apiKey: String,
         userId: Int? = nil,
         enableANRDetection: Bool = true,
         enableNetworkMonitoring: Bool = false,
         enableSessionTracking: Bool = true,
-        enableAnnouncements: Bool = true
+        enableAnnouncements: Bool = true,
+        debugLogging: Bool = false
     ) {
-        shared.apiKey = apiKey
+        TBLogger.isEnabled = debugLogging
 
-        // Tester identification — priority: manual > persisted > clipboard
+        guard !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
+            TBLogger.warn("configure() called with an empty apiKey — all events will be dropped.")
+            return
+        }
+
+        shared.apiKey = apiKey
+        TBLogger.debug("SDK configured. apiKey prefix: \(String(apiKey.prefix(6)))…")
+
         if let userId {
             shared.userId = userId
             UserDefaults.standard.set(userId, forKey: "TBTesterId")
+            TBLogger.debug("Tester identified manually: \(userId)")
         } else if let saved = UserDefaults.standard.value(forKey: "TBTesterId") as? Int {
             shared.userId = saved
+            TBLogger.debug("Tester restored from storage: \(saved)")
         } else {
             Task { await shared.detectTesterFromClipboard() }
         }
@@ -62,6 +74,7 @@ public final class TesterBuddy {
               let userId = Int(idStr) else { return false }
         shared.userId = userId
         UserDefaults.standard.set(userId, forKey: "TBTesterId")
+        TBLogger.debug("Tester identified via URL: \(userId)")
         return true
     }
 
@@ -70,14 +83,17 @@ public final class TesterBuddy {
         shared.userId = userId
         if let userId {
             UserDefaults.standard.set(userId, forKey: "TBTesterId")
+            TBLogger.debug("Tester set: \(userId)")
         } else {
             UserDefaults.standard.removeObject(forKey: "TBTesterId")
+            TBLogger.debug("Tester cleared")
         }
     }
 
     /// Set the current screen name — included in all subsequent events.
     public static func setScreen(_ name: String) {
         shared.currentScreen = name
+        TBLogger.debug("Screen: \(name)")
     }
 
     /// Log a custom event.
@@ -110,9 +126,26 @@ public final class TesterBuddy {
 
     static let shared = TesterBuddy()
 
-    var apiKey: String = ""
-    var userId: Int?
-    var currentScreen: String?
+    // Thread-safe mutable state — read/written from main thread, ANR watchdog,
+    // URLSession callbacks, and crash handlers; protect with a lock.
+    private let _lock = NSLock()
+    private var _apiKey: String = ""
+    private var _userId: Int?
+    private var _currentScreen: String?
+
+    var apiKey: String {
+        get { _lock.lock(); defer { _lock.unlock() }; return _apiKey }
+        set { _lock.lock(); defer { _lock.unlock() }; _apiKey = newValue }
+    }
+    var userId: Int? {
+        get { _lock.lock(); defer { _lock.unlock() }; return _userId }
+        set { _lock.lock(); defer { _lock.unlock() }; _userId = newValue }
+    }
+    var currentScreen: String? {
+        get { _lock.lock(); defer { _lock.unlock() }; return _currentScreen }
+        set { _lock.lock(); defer { _lock.unlock() }; _currentScreen = newValue }
+    }
+
     let eventSender = EventSender()
 
     private var sessionTracker: SessionTracker?
@@ -128,26 +161,35 @@ public final class TesterBuddy {
         if anr {
             anrDetector = ANRDetector()
             anrDetector?.start()
+            TBLogger.debug("ANR detection started")
         }
 
         if network {
             TBNetworkProtocol.enable()
+            TBLogger.debug("Network monitoring enabled")
         }
 
         if sessions {
             sessionTracker = SessionTracker()
             sessionTracker?.start()
+            TBLogger.debug("Session tracking started")
         }
 
         if announcements {
             announcementManager = AnnouncementManager()
             announcementManager?.start(apiKey: apiKey)
+            TBLogger.debug("Announcement polling started")
         }
     }
 
-    func flush(_ events: [TBEvent]) {
-        guard !apiKey.isEmpty else { return }
-        eventSender.send(events: events, apiKey: apiKey)
+    func flush(_ events: [TBEvent], completion: ((Bool) -> Void)? = nil) {
+        guard !apiKey.isEmpty else {
+            TBLogger.warn("flush called but apiKey is empty — \(events.count) event(s) dropped")
+            completion?(false)
+            return
+        }
+        TBLogger.debug("Flushing \(events.count) event(s)")
+        eventSender.send(events: events, apiKey: apiKey, completion: completion)
     }
 
     // MARK: - Tester auto-identification via clipboard
@@ -181,11 +223,15 @@ public final class TesterBuddy {
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let testerId = json["testerId"] as? Int
-        else { return }
+        else {
+            TBLogger.debug("Clipboard token resolution failed")
+            return
+        }
 
         userId = testerId
         UserDefaults.standard.set(testerId, forKey: "TBTesterId")
-        // Reset attempt counter — successful identification, no more clipboard reads needed
+        // Saturate attempt counter — successful identification, no more clipboard reads needed
         UserDefaults.standard.set(Self.maxClipboardAttempts, forKey: Self.clipboardAttemptKey)
+        TBLogger.debug("Tester identified via clipboard: \(testerId)")
     }
 }

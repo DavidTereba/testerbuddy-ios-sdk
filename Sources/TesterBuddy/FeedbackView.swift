@@ -179,6 +179,7 @@ struct FeedbackView: View {
     }
 
     private func sendFeedback() {
+        guard !isSending else { return }
         isSending = true
         focused = false
 
@@ -195,14 +196,25 @@ struct FeedbackView: View {
             testerId: TesterBuddy.shared.userId
         )
 
-        TesterBuddy.shared.flush([event])
+        // Both the network completion and the fallback timer dispatch to the main
+        // queue, so `didFinish` is only ever checked/set on the main thread — no race.
+        var didFinish = false
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        func finish() {
+            guard !didFinish else { return }
+            didFinish = true
             isSending = false
             sent = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                onDismiss()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { onDismiss() }
         }
+
+        TesterBuddy.shared.flush([event]) { _ in
+            // Even on failure the event is queued for retry — show success either way.
+            DispatchQueue.main.async { finish() }
+        }
+
+        // Fallback: close after 5 s if the network call hasn't returned yet
+        // (e.g. device is completely offline and the request is timing out).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { finish() }
     }
 }
