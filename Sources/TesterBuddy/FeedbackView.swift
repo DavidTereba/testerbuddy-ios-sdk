@@ -187,6 +187,9 @@ struct FeedbackView: View {
         if let img = screenshot, let b64 = ScreenshotHelper.toBase64(img) {
             meta["screenshotBase64"] = b64
         }
+        if let errorsJson = SessionErrorBuffer.shared.jsonString() {
+            meta["sessionErrors"] = errorsJson
+        }
 
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .feedback,

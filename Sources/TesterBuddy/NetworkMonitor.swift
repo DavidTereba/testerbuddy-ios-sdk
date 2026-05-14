@@ -86,10 +86,12 @@ extension TBNetworkProtocol: URLSessionDataDelegate {
     private func reportConnectionError(_ error: Error, for request: URLRequest?) {
         let url = request?.url?.absoluteString ?? "unknown"
         let code = (error as NSError).code
-        TBLogger.debug("Network error (\(code)) for \(url)")
+        let msg = "Network error (\(code)): \(error.localizedDescription)"
+        TBLogger.debug("\(msg) for \(url)")
+        SessionErrorBuffer.shared.record(type: "network_error", message: "\(msg) — \(url)")
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .networkError,
-            message: "Network error (\(code)): \(error.localizedDescription)",
+            message: msg,
             screenName: TesterBuddy.shared.currentScreen,
             metadata: ["url": url, "errorCode": String(code)],
             testerId: TesterBuddy.shared.userId
@@ -99,10 +101,12 @@ extension TBNetworkProtocol: URLSessionDataDelegate {
 
     private func reportHTTPError(_ response: HTTPURLResponse, for request: URLRequest?) {
         let url = request?.url?.absoluteString ?? "unknown"
-        TBLogger.debug("HTTP \(response.statusCode) for \(url)")
+        let msg = "HTTP \(response.statusCode): \(url)"
+        TBLogger.debug(msg)
+        SessionErrorBuffer.shared.record(type: "network_error", message: msg)
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .networkError,
-            message: "HTTP \(response.statusCode): \(url)",
+            message: msg,
             screenName: TesterBuddy.shared.currentScreen,
             metadata: ["url": url, "status": String(response.statusCode),
                        "method": request?.httpMethod ?? "GET"],

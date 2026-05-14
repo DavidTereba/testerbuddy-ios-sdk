@@ -20,6 +20,14 @@ enum CrashReporter {
               let events = try? JSONDecoder().decode([TBEvent].self, from: data) else { return }
         UserDefaults.standard.removeObject(forKey: pendingKey)
         TBLogger.debug("Flushing \(events.count) crash event(s) from previous session")
+        // Record in session buffer so feedback submitted after a restart includes the crash context.
+        for event in events {
+            SessionErrorBuffer.shared.record(
+                type: "crash",
+                message: event.message ?? "Unknown crash",
+                stack: event.stack
+            )
+        }
         TesterBuddy.shared.flush(events)
     }
 

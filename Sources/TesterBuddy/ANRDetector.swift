@@ -77,10 +77,12 @@ final class ANRDetector {
     }
 
     private func report(blockedFor seconds: TimeInterval) {
-        TBLogger.debug("ANR detected: main thread blocked for \(Int(seconds))s")
+        let msg = "ANR: main thread blocked for \(Int(seconds))s"
+        TBLogger.debug(msg)
+        SessionErrorBuffer.shared.record(type: "anr", message: msg)
         let event = TesterBuddy.shared.eventSender.makeEvent(
             type: .anr,
-            message: "ANR: main thread blocked for \(Int(seconds))s",
+            message: msg,
             screenName: TesterBuddy.shared.currentScreen,
             testerId: TesterBuddy.shared.userId
         )

@@ -98,6 +98,7 @@ public final class TesterBuddy {
 
     /// Log a custom event.
     public static func log(message: String, metadata: [String: String]? = nil) {
+        SessionErrorBuffer.shared.record(type: "custom", message: message)
         let event = shared.eventSender.makeEvent(
             type: .custom,
             message: message,
@@ -112,9 +113,11 @@ public final class TesterBuddy {
     public static func logNetworkError(url: String, statusCode: Int? = nil, message: String? = nil) {
         var meta: [String: String] = ["url": url]
         if let code = statusCode { meta["statusCode"] = String(code) }
+        let msg = message ?? "Network error: \(url)"
+        SessionErrorBuffer.shared.record(type: "network_error", message: msg)
         let event = shared.eventSender.makeEvent(
             type: .networkError,
-            message: message ?? "Network error: \(url)",
+            message: msg,
             screenName: shared.currentScreen,
             metadata: meta,
             testerId: shared.userId
