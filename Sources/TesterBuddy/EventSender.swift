@@ -30,6 +30,10 @@ final class EventSender {
         if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
             meta["appBuild"] = build
         }
+
+        let rawDeviceInfo = DeviceInfoCollector.collect()
+        let deviceInfo = rawDeviceInfo.mapValues { AnyCodable($0) }
+
         return TBEvent(
             type: type.rawValue,
             pageUrl: screenName,
@@ -38,7 +42,8 @@ final class EventSender {
             metadata: meta,
             testerId: testerId,
             sessionId: sessionId,
-            userAgent: userAgent
+            userAgent: userAgent,
+            deviceInfo: deviceInfo
         )
     }
 

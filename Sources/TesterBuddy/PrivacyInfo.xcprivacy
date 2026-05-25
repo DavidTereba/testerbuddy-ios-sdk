@@ -27,6 +27,15 @@
                 <string>C617.1</string>
             </array>
         </dict>
+        <!-- Disk space: device storage info included in device_info for crash/error context -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>E174.1</string>
+            </array>
+        </dict>
     </array>
 
     <!-- Data collected and sent to testerbuddy.app -->
